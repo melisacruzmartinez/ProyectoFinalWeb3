@@ -142,10 +142,13 @@ Findings corregidos respecto de la versión anterior: chequeo de saldo que conta
 ### 1. Configurar variables
 ```bash
 cp .env.example .env
-cast wallet new   # repetir 3 veces y copiar las private keys en AUDITOR_1_PK..3
-# completar PRIVATE_KEY (con Sepolia ETH) y ETHERSCAN_API_KEY
+# completar PRIVATE_KEY (con Sepolia ETH), AUDITOR_1..3 (direcciones públicas),
+# AUDITOR_1_PK y AUDITOR_2_PK (claves locales que correspondan a esos auditores),
+# y ETHERSCAN_API_KEY
 source .env
 ```
+
+Las direcciones `AUDITOR_1`, `AUDITOR_2` y `AUDITOR_3` son las cuentas que quedarán autorizadas en el contrato. Las claves `AUDITOR_1_PK` y `AUDITOR_2_PK` solo se usan para firmar los votos del script `Interact`; cada clave debe corresponder a una dirección registrada. No compartas ni subas claves privadas.
 
 ### 2. Deploy + verificación en Sepolia
 ```bash
@@ -167,7 +170,7 @@ cd frontend
 npm install
 npm run dev
 ```
-Abrir <http://127.0.0.1:5173>, conectar MetaMask (la app pide cambiar a Sepolia), y donar. La transacción queda visible en Etherscan. Para usar Anvil, crear `frontend/.env` con `VITE_NETWORK=anvil`.
+Abrir <http://127.0.0.1:5173>. La app lee la recaudación de Sepolia en modo de solo lectura y muestra el estado actual del contrato sin conectar una wallet. Para donar, conectar MetaMask y aceptar el cambio a Sepolia; la transacción queda visible en Etherscan. Para usar Anvil, crear `frontend/.env` con `VITE_NETWORK=anvil`.
 
 ### 5. Demo local con Anvil + MetaMask (opcional)
 
@@ -182,6 +185,9 @@ export PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f
 export AUDITOR_1_PK=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
 export AUDITOR_2_PK=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a
 export AUDITOR_3_PK=0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6
+export AUDITOR_1=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+export AUDITOR_2=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
+export AUDITOR_3=0x90F79bf6EB2c4f870365E785982E1f101E93b906
 forge script script/Deploy.s.sol --rpc-url http://127.0.0.1:8545 --broadcast
 ```
 En una instancia limpia de Anvil, `ScientificFundOracle` queda en `0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512`, que es la dirección configurada en `frontend/src/contract.js`.

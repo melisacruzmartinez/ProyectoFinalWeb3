@@ -40,7 +40,7 @@ const auditors = ['Alice', 'Bob', 'Carol']
 
 function App() {
   const [donation, setDonation] = useState('0.5')
-  const [raised, setRaised] = useState('128.40')
+  const [raised, setRaised] = useState('0')
   const [selected, setSelected] = useState(0)
   const [wallet, setWallet] = useState('')
   const [status, setStatus] = useState('MetaMask no conectado')
@@ -57,7 +57,7 @@ function App() {
     try {
       const value = await contractInstance.totalRaised()
       setRaised(ethers.formatEther(value))
-    } catch (error) {
+    } catch {
       setStatus('No se pudo leer la recaudación del contrato.')
     }
   }, [])
@@ -119,9 +119,29 @@ function App() {
 
   useEffect(() => {
     const init = async () => {
-      if (!window.ethereum) return
-
       try {
+        const readProvider = new ethers.JsonRpcProvider(NETWORK.rpcUrls[0])
+        const network = await readProvider.getNetwork()
+        if (network.chainId !== NETWORK.chainId) {
+          setStatus(`No se pudo conectar a ${NETWORK.chainName}.`)
+          return
+        }
+
+        const deployedCode = await readProvider.getCode(CONTRACT_ADDRESS)
+        if (deployedCode === '0x') {
+          setStatus(`No hay contrato en ${CONTRACT_ADDRESS} sobre ${NETWORK.chainName}.`)
+          return
+        }
+
+        const readContract = new ethers.Contract(
+          CONTRACT_ADDRESS,
+          SCIENTIFIC_FUND_ABI,
+          readProvider,
+        )
+        await refreshRaised(readContract)
+
+        if (!window.ethereum) return
+
         const provider = new ethers.BrowserProvider(window.ethereum)
         const accounts = await provider.listAccounts()
         if (accounts.length > 0) {
@@ -138,6 +158,7 @@ function App() {
         }
       } catch (error) {
         console.error(error)
+        setStatus(error.shortMessage || error.message || 'No se pudo leer el contrato.')
       }
     }
 
@@ -229,7 +250,7 @@ function App() {
           <div className="fund-box">
             <div className="stat-row">
               <span>Total recaudado</span>
-              <strong>{Number(raised).toFixed(2)} ETH</strong>
+              <strong>{Number(raised).toLocaleString('es-ES', { maximumFractionDigits: 4 })} ETH</strong>
             </div>
             <div className="stat-row">
               <span>Objetivo</span>
@@ -277,7 +298,7 @@ function App() {
           <article className="metric-card">
             <span>Red</span>
             <strong>{NETWORK.chainName}</strong>
-            <small>ETH ficticio</small>
+            <small>ETH de prueba</small>
           </article>
         </section>
 
