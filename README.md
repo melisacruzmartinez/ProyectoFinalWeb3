@@ -78,7 +78,10 @@ ProyectoFinalWeb3/
 │   ├── ScientificFundOracle.sol
 │   ├── ScientificOracle.sol
 │   └── interfaces/IScientificOracle.sol
-├── test/ScientificFundOracle.t.sol     # 34 tests (unit, revert, reentrancy, fuzz)
+├── test/
+│   ├── ScientificFundOracle.t.sol          # 34 tests (unit, revert, reentrancy, fuzz)
+│   ├── ScientificFundOracleFuzz.t.sol      # fuzzing de liberación, mayoría, donaciones y oráculo
+│   └── ScientificFundOracleInvariant.t.sol # invariantes contables con handler
 ├── script/
 │   ├── Deploy.s.sol                    # deploy de oráculo + escrow
 │   └── Interact.s.sol                  # flujo completo on-chain
@@ -104,7 +107,7 @@ forge test -vv
 forge coverage --no-match-coverage "script|test"
 ```
 
-Resultado: **34 tests pasan (100%)**.
+Resultado: **40 tests pasan (100%)**: 34 unitarios, 5 de fuzzing y una suite de 3 invariantes.
 
 | Archivo | Lines | Statements | Branches | Funcs |
 |---|---|---|---|---|
@@ -112,6 +115,13 @@ Resultado: **34 tests pasan (100%)**.
 | ScientificOracle.sol | 100% | 100% | 100% | 100% |
 
 Incluye: flujo completo exitoso, dos hitos consecutivos, todos los custom errors, rechazo del oráculo, fallo de transferencia, intento de reentrada y un test de fuzzing sobre donaciones.
+
+Fuzzing (`ScientificFundOracleFuzz.t.sol`): la liberación paga exactamente el monto del hito, revierte con `InsufficientBalance` si el monto supera el saldo, solo se libera con mayoría para cualquier combinación de votos, las donaciones de varios donantes se acumulan bien y el oráculo aplica sus reglas para cualquier entrada.
+
+Invariantes (`ScientificFundOracleInvariant.t.sol`): un handler ejecuta secuencias aleatorias de donaciones, hitos, votos, validaciones y liberaciones (256 runs, 128.000 llamadas, sin reverts) y después de cada paso se verifica que:
+- el saldo del contrato es siempre `totalRaised - totalReleased`;
+- nunca se libera más de lo recaudado;
+- `totalRaised` y `totalReleased` coinciden con lo que el handler donó y liberó.
 
 ## IX. Análisis estático (Slither)
 
