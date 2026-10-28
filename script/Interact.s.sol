@@ -10,8 +10,12 @@ import {ScientificFundOracle} from "../contracts/ScientificFundOracle.sol";
 /// @dev Variables de entorno: PRIVATE_KEY (owner/donante), AUDITOR_1_PK, AUDITOR_2_PK, FUND_ADDRESS.
 ///      Opcionales: DONATION_WEI (default 0.01 ether), MILESTONE_WEI (default 0.005 ether), AUDITOR_GAS_WEI (default 0.003 ether).
 contract Interact is Script {
+    /// @notice Se intentó ejecutar una acción de auditor con una cuenta no registrada en el escrow.
+    /// @param auditor Dirección derivada de una clave privada que no está registrada como auditor.
     error AuditorNotRegistered(address auditor);
 
+    /// @notice Ejecuta el flujo principal on-chain usando las cuentas definidas en el entorno.
+    /// @dev Requiere que las claves de auditor correspondan a auditores registrados en el escrow.
     function run() external {
         uint256 ownerPk = vm.envUint("PRIVATE_KEY");
         uint256 auditor1Pk = vm.envUint("AUDITOR_1_PK");
@@ -34,7 +38,7 @@ contract Interact is Script {
         if (auditor2.balance < auditorGas) payable(auditor2).transfer(auditorGas);
         fund.contribute{value: donation}();
         uint256 id = fund.createMilestone(
-            "Fase 1: protocolo experimental", "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG", milestoneAmount
+            "Fase 1", "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG", milestoneAmount
         );
         vm.stopBroadcast();
 

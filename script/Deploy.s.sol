@@ -11,6 +11,12 @@ import {ScientificFundOracle} from "../contracts/ScientificFundOracle.sol";
 ///      PRIVATE_KEY  -> deployer y owner del proyecto.
 ///      AUDITOR_1, AUDITOR_2, AUDITOR_3 -> direcciones públicas de los auditores.
 contract Deploy is Script {
+    /// @notice Las direcciones de auditor deben ser distintas de cero y únicas.
+    error InvalidAuditorConfiguration();
+
+    /// @notice Despliega el oracle y el escrow con el owner y auditores configurados en el entorno.
+    /// @return oracle Dirección del contrato ScientificOracle desplegado.
+    /// @return fund Dirección del contrato ScientificFundOracle desplegado.
     function run() external returns (ScientificOracle oracle, ScientificFundOracle fund) {
         uint256 deployerPk = vm.envUint("PRIVATE_KEY");
         address projectOwner = vm.addr(deployerPk);
@@ -24,7 +30,7 @@ contract Deploy is Script {
             auditors[0] == address(0) || auditors[1] == address(0) || auditors[2] == address(0)
                 || auditors[0] == auditors[1] || auditors[0] == auditors[2] || auditors[1] == auditors[2]
         ) {
-            revert("Auditor addresses must be nonzero and unique");
+            revert InvalidAuditorConfiguration();
         }
 
         vm.startBroadcast(deployerPk);

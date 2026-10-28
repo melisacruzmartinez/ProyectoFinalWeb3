@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ethers } from 'ethers'
 import './App.css'
-import { CONTRACT_ADDRESS, SCIENTIFIC_FUND_ABI } from './contract'
+import { CONTRACT_ADDRESS, NETWORK, SCIENTIFIC_FUND_ABI } from './contract'
 import {
   decryptText,
   encryptText,
@@ -40,7 +40,7 @@ const auditors = ['Alice', 'Bob', 'Carol']
 
 function App() {
   const [donation, setDonation] = useState('0.5')
-  const [raised, setRaised] = useState('128.40')
+  const [raised, setRaised] = useState('0')
   const [selected, setSelected] = useState(0)
   const [wallet, setWallet] = useState('')
   const [status, setStatus] = useState('MetaMask no conectado')
@@ -57,7 +57,7 @@ function App() {
     try {
       const value = await contractInstance.totalRaised()
       setRaised(ethers.formatEther(value))
-    } catch (error) {
+    } catch {
       setStatus('No se pudo leer la recaudación del contrato.')
     }
   }, [])
@@ -68,7 +68,7 @@ function App() {
     try {
       await window.ethereum.request({
         method: 'wallet_switchEthereumChain',
-        params: [{ chainId: '0x7a69' }],
+        params: [{ chainId: NETWORK.chainIdHex }],
       })
     } catch (switchError) {
       if (switchError.code === 4902) {
@@ -76,11 +76,11 @@ function App() {
           method: 'wallet_addEthereumChain',
           params: [
             {
-              chainId: '0x7a69',
-              chainName: 'Anvil Local',
+              chainId: NETWORK.chainIdHex,
+              chainName: NETWORK.chainName,
               nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-              rpcUrls: ['http://127.0.0.1:8545'],
-              blockExplorerUrls: [],
+              rpcUrls: NETWORK.rpcUrls,
+              blockExplorerUrls: NETWORK.blockExplorerUrls,
             },
           ],
         })
@@ -119,9 +119,29 @@ function App() {
 
   useEffect(() => {
     const init = async () => {
-      if (!window.ethereum) return
-
       try {
+        const readProvider = new ethers.JsonRpcProvider(NETWORK.rpcUrls[0])
+        const network = await readProvider.getNetwork()
+        if (network.chainId !== NETWORK.chainId) {
+          setStatus(`No se pudo conectar a ${NETWORK.chainName}.`)
+          return
+        }
+
+        const deployedCode = await readProvider.getCode(CONTRACT_ADDRESS)
+        if (deployedCode === '0x') {
+          setStatus(`No hay contrato en ${CONTRACT_ADDRESS} sobre ${NETWORK.chainName}.`)
+          return
+        }
+
+        const readContract = new ethers.Contract(
+          CONTRACT_ADDRESS,
+          SCIENTIFIC_FUND_ABI,
+          readProvider,
+        )
+        await refreshRaised(readContract)
+
+        if (!window.ethereum) return
+
         const provider = new ethers.BrowserProvider(window.ethereum)
         const accounts = await provider.listAccounts()
         if (accounts.length > 0) {
@@ -138,6 +158,7 @@ function App() {
         }
       } catch (error) {
         console.error(error)
+        setStatus(error.shortMessage || error.message || 'No se pudo leer el contrato.')
       }
     }
 
@@ -167,14 +188,14 @@ function App() {
       setIsLoading(true)
       const provider = new ethers.BrowserProvider(window.ethereum)
       const network = await provider.getNetwork()
-      if (network.chainId !== 31337n) {
-        setStatus('Selecciona Anvil Local (chain ID 31337) en MetaMask.')
+      if (network.chainId !== NETWORK.chainId) {
+        setStatus(`Selecciona ${NETWORK.chainName} (chain ID ${NETWORK.chainId}) en MetaMask.`)
         return
       }
 
       const deployedCode = await provider.getCode(CONTRACT_ADDRESS)
       if (deployedCode === '0x') {
-        setStatus('No hay contrato en esta instancia de Anvil. Vuelve a desplegar con script/Deploy.s.sol.')
+        setStatus(`No hay contrato en ${CONTRACT_ADDRESS} sobre ${NETWORK.chainName}.`)
         return
       }
 
@@ -229,7 +250,7 @@ function App() {
           <div className="fund-box">
             <div className="stat-row">
               <span>Total recaudado</span>
-              <strong>{Number(raised).toFixed(2)} ETH</strong>
+              <strong>{Number(raised).toLocaleString('es-ES', { maximumFractionDigits: 4 })} ETH</strong>
             </div>
             <div className="stat-row">
               <span>Objetivo</span>
@@ -276,8 +297,8 @@ function App() {
           </article>
           <article className="metric-card">
             <span>Red</span>
-            <strong>Anvil</strong>
-            <small>ETH ficticio</small>
+            <strong>{NETWORK.chainName}</strong>
+            <small>ETH de prueba</small>
           </article>
         </section>
 
