@@ -9,16 +9,23 @@ import {ScientificFundOracle} from "../contracts/ScientificFundOracle.sol";
 /// @notice Despliega ScientificOracle y ScientificFundOracle en una red EVM (ej. Sepolia).
 /// @dev Variables de entorno (ver .env.example):
 ///      PRIVATE_KEY  -> deployer y owner del proyecto.
-///      AUDITOR_1_PK, AUDITOR_2_PK, AUDITOR_3_PK -> se usan solo para derivar las direcciones de los auditores.
+///      AUDITOR_1, AUDITOR_2, AUDITOR_3 -> direcciones públicas de los auditores.
 contract Deploy is Script {
     function run() external returns (ScientificOracle oracle, ScientificFundOracle fund) {
         uint256 deployerPk = vm.envUint("PRIVATE_KEY");
         address projectOwner = vm.addr(deployerPk);
 
         address[] memory auditors = new address[](3);
-        auditors[0] = vm.addr(vm.envUint("AUDITOR_1_PK"));
-        auditors[1] = vm.addr(vm.envUint("AUDITOR_2_PK"));
-        auditors[2] = vm.addr(vm.envUint("AUDITOR_3_PK"));
+        auditors[0] = vm.envAddress("AUDITOR_1");
+        auditors[1] = vm.envAddress("AUDITOR_2");
+        auditors[2] = vm.envAddress("AUDITOR_3");
+
+        if (
+            auditors[0] == address(0) || auditors[1] == address(0) || auditors[2] == address(0)
+                || auditors[0] == auditors[1] || auditors[0] == auditors[2] || auditors[1] == auditors[2]
+        ) {
+            revert("Auditor addresses must be nonzero and unique");
+        }
 
         vm.startBroadcast(deployerPk);
         oracle = new ScientificOracle();

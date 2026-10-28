@@ -10,6 +10,8 @@ import {ScientificFundOracle} from "../contracts/ScientificFundOracle.sol";
 /// @dev Variables de entorno: PRIVATE_KEY (owner/donante), AUDITOR_1_PK, AUDITOR_2_PK, FUND_ADDRESS.
 ///      Opcionales: DONATION_WEI (default 0.01 ether), MILESTONE_WEI (default 0.005 ether), AUDITOR_GAS_WEI (default 0.003 ether).
 contract Interact is Script {
+    error AuditorNotRegistered(address auditor);
+
     function run() external {
         uint256 ownerPk = vm.envUint("PRIVATE_KEY");
         uint256 auditor1Pk = vm.envUint("AUDITOR_1_PK");
@@ -22,6 +24,9 @@ contract Interact is Script {
 
         address auditor1 = vm.addr(auditor1Pk);
         address auditor2 = vm.addr(auditor2Pk);
+
+        if (!fund.isAuditor(auditor1)) revert AuditorNotRegistered(auditor1);
+        if (!fund.isAuditor(auditor2)) revert AuditorNotRegistered(auditor2);
 
         // 1) Owner: fondea gas a los auditores (si hace falta), dona y crea el hito.
         vm.startBroadcast(ownerPk);
