@@ -174,7 +174,7 @@ function App() {
 
       const deployedCode = await provider.getCode(CONTRACT_ADDRESS)
       if (deployedCode === '0x') {
-        setStatus('No hay contrato en esta instancia de Anvil. Vuelve a desplegar ScientificFund.')
+        setStatus('No hay contrato en esta instancia de Anvil. Vuelve a desplegar con script/Deploy.s.sol.')
         return
       }
 

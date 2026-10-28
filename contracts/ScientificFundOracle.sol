@@ -3,192 +3,277 @@ pragma solidity ^0.8.20;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IScientificOracle} from "./interfaces/IScientificOracle.sol";
 
 /// @title Scientific Fund with External Oracle Validation
 /// @author Proyecto Final Web3
-/// @notice Extends the funding escrow with an external validation layer before releasing funds.
-// 1) Interfaz que define el contrato externo con el que este contrato interactúa.
-//    La validación del hito se delega a un oracle ajeno a este contrato.
-interface IScientificOracle {
-    function validateMilestone(address project, uint256 milestoneId, string memory ipfsHash, uint256 amount)
-        external
-        view
-        returns (bool);
-}
-
+/// @notice Escrow de financiación científica: los donantes aportan ETH, el responsable del proyecto
+///         define hitos con evidencia en IPFS y los fondos de cada hito solo se liberan cuando
+///         (1) la mayoría absoluta de auditores lo aprueba y (2) un oráculo externo valida la evidencia.
+/// @dev Roles:
+///      - Owner (responsable del proyecto): crea hitos y ejecuta la liberación; recibe los fondos.
+///      - Auditores: lista fija definida en el constructor; votan una vez por hito.
+///      - Cualquiera: puede donar y disparar la validación del oráculo (es determinista y no mueve fondos).
 contract ScientificFundOracle is Ownable, ReentrancyGuard {
+    /// @notice Datos de un hito de financiación.
+    /// @param amount Monto en wei asignado al hito.
+    /// @param votesFor Cantidad de votos de auditores a favor.
+    /// @param votesAgainst Cantidad de votos de auditores en contra.
+    /// @param released Indica si los fondos del hito ya fueron liberados.
+    /// @param oracleApproved Indica si el oráculo externo aprobó la evidencia.
+    /// @param title Nombre descriptivo del hito.
+    /// @param ipfsHash CID de IPFS con la evidencia del hito.
     struct Milestone {
-        string title;
-        string ipfsHash;
-        uint256 amount;
+        uint128 amount;
+        uint32 votesFor;
+        uint32 votesAgainst;
         bool released;
         bool oracleApproved;
-        uint256 votesFor;
-        uint256 votesAgainst;
+        string title;
+        string ipfsHash;
     }
 
+    /// @notice Contrato oráculo externo que valida la evidencia de los hitos.
+    IScientificOracle public immutable oracle;
+
+    /// @notice Total de ETH (wei) donado al contrato desde su creación.
     uint256 public totalRaised;
+    /// @notice Total de ETH (wei) liberado al responsable del proyecto.
     uint256 public totalReleased;
+    /// @notice Cantidad de hitos creados; también es el próximo ID de hito.
     uint256 public milestoneCount;
-    address public oracle;
 
+    /// @notice Lista de auditores habilitados para votar.
     address[] public auditors;
-    mapping(address => bool) public isAuditor;
-    mapping(uint256 => mapping(address => bool)) public hasVoted;
-    mapping(uint256 => Milestone) public milestones;
-    mapping(address => uint256) public contributions;
+    /// @notice Indica si una dirección es auditor.
+    mapping(address auditor => bool allowed) public isAuditor;
+    /// @notice Indica si un auditor ya votó un hito determinado.
+    mapping(uint256 milestoneId => mapping(address auditor => bool voted)) public hasVoted;
+    /// @notice Hitos registrados por ID.
+    mapping(uint256 milestoneId => Milestone data) public milestones;
+    /// @notice Total donado por cada dirección.
+    mapping(address donor => uint256 amount) public contributions;
 
-    event Contribution(address indexed donor, uint256 amount, uint256 totalRaised_);
+    /// @notice Se emite cuando un donante aporta ETH al escrow.
+    /// @param donor Dirección del donante.
+    /// @param amount Monto donado en wei.
+    /// @param totalRaised Total recaudado luego de la donación.
+    event Contribution(address indexed donor, uint256 amount, uint256 totalRaised);
+    /// @notice Se emite cuando el owner crea un hito.
+    /// @param milestoneId ID del hito creado.
+    /// @param title Título del hito.
+    /// @param ipfsHash CID de IPFS con la evidencia.
+    /// @param amount Monto asignado en wei.
     event MilestoneCreated(uint256 indexed milestoneId, string title, string ipfsHash, uint256 amount);
+    /// @notice Se emite cuando un auditor vota un hito.
+    /// @param milestoneId ID del hito votado.
+    /// @param auditor Dirección del auditor.
+    /// @param support `true` si aprueba, `false` si rechaza.
     event VoteCast(uint256 indexed milestoneId, address indexed auditor, bool support);
-    event OracleUpdated(address indexed oracle);
+    /// @notice Se emite al registrar el resultado de la validación del oráculo.
+    /// @param milestoneId ID del hito validado.
+    /// @param approved Resultado devuelto por el oráculo.
     event OracleApproval(uint256 indexed milestoneId, bool approved);
-    event MilestoneReleased(uint256 indexed milestoneId, uint256 amount, address recipient);
+    /// @notice Se emite cuando se liberan los fondos de un hito.
+    /// @param milestoneId ID del hito liberado.
+    /// @param amount Monto transferido en wei.
+    /// @param recipient Dirección que recibió los fondos.
+    event MilestoneReleased(uint256 indexed milestoneId, uint256 amount, address indexed recipient);
 
+    /// @notice Se recibió la dirección cero donde se requiere una dirección válida.
     error ZeroAddress();
+    /// @notice No se recibió ningún auditor en el constructor.
+    error NoAuditors();
+    /// @notice El título del hito está vacío.
     error EmptyTitle();
+    /// @notice El CID de IPFS del hito está vacío.
     error EmptyIpfsHash();
+    /// @notice El monto es cero o excede el máximo soportado.
     error InvalidAmount();
-    error NotAuditor();
-    error AlreadyVoted();
-    error MilestoneNotFound();
-    error MilestoneAlreadyReleased();
-    error NoApproval();
-    error OracleRejected();
-    error InvalidOracle();
+    /// @notice Quien llama no es auditor.
+    /// @param caller Dirección que intentó votar.
+    error NotAuditor(address caller);
+    /// @notice El auditor ya votó este hito.
+    /// @param milestoneId ID del hito.
+    /// @param auditor Dirección del auditor.
+    error AlreadyVoted(uint256 milestoneId, address auditor);
+    /// @notice El hito no existe.
+    /// @param milestoneId ID consultado.
+    error MilestoneNotFound(uint256 milestoneId);
+    /// @notice Los fondos del hito ya fueron liberados.
+    /// @param milestoneId ID del hito.
+    error MilestoneAlreadyReleased(uint256 milestoneId);
+    /// @notice El hito no alcanzó la mayoría absoluta de auditores.
+    /// @param votesFor Votos a favor obtenidos.
+    /// @param required Votos a favor requeridos.
+    error NoApproval(uint256 votesFor, uint256 required);
+    /// @notice El oráculo no aprobó (o todavía no validó) la evidencia del hito.
+    /// @param milestoneId ID del hito.
+    error OracleRejected(uint256 milestoneId);
+    /// @notice El contrato no tiene saldo suficiente para liberar el hito.
+    /// @param available Saldo disponible en wei.
+    /// @param required Monto requerido en wei.
+    error InsufficientBalance(uint256 available, uint256 required);
+    /// @notice Falló la transferencia de ETH al responsable del proyecto.
     error TransferFailed();
 
-    // 2) Constructor: recibe la dirección del contrato oracle externo.
-    //    Ese address se guarda en storage y será usado más adelante para invocarlo.
-    //    Ejemplo de uso correcto:
-    //    ScientificFundOracle fund = new ScientificFundOracle(
-    //        0x1111111111111111111111111111111111111111,
-    //        [0x222..., 0x333..., 0x444...],
-    //        0x5555555555555555555555555555555555555555
-    //    );
-    //    Si alguna dirección es 0x000... o no llega definida, la transacción hace revert.
+    /// @notice Verifica que el hito exista.
+    /// @param _milestoneId ID del hito a verificar.
+    modifier milestoneExists(uint256 _milestoneId) {
+        _checkMilestoneExists(_milestoneId);
+        _;
+    }
+
+    /// @notice Despliega el escrow con su responsable, auditores y oráculo.
+    /// @param _projectOwner Responsable del proyecto (owner); recibe los fondos liberados.
+    /// @param _auditors Direcciones de los auditores. Los duplicados se ignoran.
+    /// @param _oracle Dirección del contrato oráculo que implementa IScientificOracle.
     constructor(address _projectOwner, address[] memory _auditors, address _oracle) Ownable(_projectOwner) {
-        if (_projectOwner == address(0)) revert ZeroAddress();
-        if (_auditors.length == 0) revert ZeroAddress();
-        if (_oracle == address(0)) revert InvalidOracle();
+        uint256 length = _auditors.length;
+        if (length == 0) revert NoAuditors();
+        if (_oracle == address(0)) revert ZeroAddress();
 
-        oracle = _oracle;
-        emit OracleUpdated(_oracle);
+        oracle = IScientificOracle(_oracle);
 
-        for (uint256 i = 0; i < _auditors.length; i++) {
+        for (uint256 i; i < length;) {
             address auditor = _auditors[i];
             if (auditor == address(0)) revert ZeroAddress();
             if (!isAuditor[auditor]) {
                 isAuditor[auditor] = true;
                 auditors.push(auditor);
             }
+            unchecked {
+                ++i;
+            }
         }
     }
 
-    /// @notice Contribute ETH to the escrow that supports scientific milestones.
-    function contribute() external payable nonReentrant {
+    /// @notice Dona ETH al escrow del proyecto.
+    /// @dev Solo actualiza contabilidad interna; no realiza llamadas externas.
+    function contribute() external payable {
         if (msg.value == 0) revert InvalidAmount();
 
         contributions[msg.sender] += msg.value;
-        totalRaised += msg.value;
+        uint256 newTotal = totalRaised + msg.value;
+        totalRaised = newTotal;
 
-        emit Contribution(msg.sender, msg.value, totalRaised);
+        emit Contribution(msg.sender, msg.value, newTotal);
     }
 
-    /// @notice Register a scientific milestone with its evidential reference.
-    /// @param _title Milestone title.
-    /// @param _ipfsHash Hash or CID representing the milestone evidence.
-    /// @param _amount ETH amount reserved for the milestone.
-    function createMilestone(string memory _title, string memory _ipfsHash, uint256 _amount) external onlyOwner {
+    /// @notice Crea un hito de financiación. Solo el owner.
+    /// @param _title Nombre descriptivo del hito.
+    /// @param _ipfsHash CID de IPFS con la evidencia o documentación del avance.
+    /// @param _amount Monto en wei asignado al hito.
+    /// @return milestoneId ID asignado al nuevo hito.
+    function createMilestone(string calldata _title, string calldata _ipfsHash, uint256 _amount)
+        external
+        onlyOwner
+        returns (uint256 milestoneId)
+    {
         if (bytes(_title).length == 0) revert EmptyTitle();
         if (bytes(_ipfsHash).length == 0) revert EmptyIpfsHash();
-        if (_amount == 0) revert InvalidAmount();
+        if (_amount == 0 || _amount > type(uint128).max) revert InvalidAmount();
 
-        uint256 milestoneId = milestoneCount;
-        milestones[milestoneId] = Milestone({
-            title: _title,
-            ipfsHash: _ipfsHash,
-            amount: _amount,
-            released: false,
-            oracleApproved: false,
-            votesFor: 0,
-            votesAgainst: 0
-        });
-        milestoneCount++;
+        milestoneId = milestoneCount;
+        Milestone storage m = milestones[milestoneId];
+        // forge-lint: disable-next-line(unsafe-typecast)
+        m.amount = uint128(_amount); // seguro: validado contra type(uint128).max arriba
+        m.title = _title;
+        m.ipfsHash = _ipfsHash;
+        milestoneCount = milestoneId + 1;
 
         emit MilestoneCreated(milestoneId, _title, _ipfsHash, _amount);
     }
 
-    /// @notice Vote on the milestone approval.
-    /// @param _milestoneId Milestone identifier.
-    /// @param _support Approval or rejection vote.
-    function voteMilestone(uint256 _milestoneId, bool _support) external {
-        if (!isAuditor[msg.sender]) revert NotAuditor();
-        if (_milestoneId >= milestoneCount) revert MilestoneNotFound();
-        if (hasVoted[_milestoneId][msg.sender]) revert AlreadyVoted();
-        if (milestones[_milestoneId].released) revert MilestoneAlreadyReleased();
+    /// @notice Registra el voto de un auditor sobre un hito. Solo auditores, un voto por hito.
+    /// @param _milestoneId ID del hito a evaluar.
+    /// @param _support `true` para aprobar, `false` para rechazar.
+    function voteMilestone(uint256 _milestoneId, bool _support) external milestoneExists(_milestoneId) {
+        if (!isAuditor[msg.sender]) revert NotAuditor(msg.sender);
+        if (hasVoted[_milestoneId][msg.sender]) revert AlreadyVoted(_milestoneId, msg.sender);
+
+        Milestone storage m = milestones[_milestoneId];
+        if (m.released) revert MilestoneAlreadyReleased(_milestoneId);
 
         hasVoted[_milestoneId][msg.sender] = true;
-
         if (_support) {
-            milestones[_milestoneId].votesFor++;
+            ++m.votesFor;
         } else {
-            milestones[_milestoneId].votesAgainst++;
+            ++m.votesAgainst;
         }
 
         emit VoteCast(_milestoneId, msg.sender, _support);
     }
 
-    /// @notice Ask the external oracle to validate the milestone evidence.
-    /// @param _milestoneId Milestone to validate.
-    // 3) Llamada inter-contratos: este contrato invoca el oracle externo.
-    //    El resultado booleano decide si el hito queda validado o rechazado.
-    function validateMilestone(uint256 _milestoneId) external {
-        if (_milestoneId >= milestoneCount) revert MilestoneNotFound();
-        if (milestones[_milestoneId].released) revert MilestoneAlreadyReleased();
-        if (oracle == address(0)) revert InvalidOracle();
+    /// @notice Consulta al oráculo externo y guarda si aprueba la evidencia del hito.
+    /// @dev Llamada inter-contrato de solo lectura (view); puede invocarla cualquiera.
+    /// @param _milestoneId ID del hito a validar.
+    /// @return approved Resultado devuelto por el oráculo.
+    function validateMilestone(uint256 _milestoneId) external milestoneExists(_milestoneId) returns (bool approved) {
+        Milestone storage m = milestones[_milestoneId];
+        if (m.released) revert MilestoneAlreadyReleased(_milestoneId);
 
-        bool approved = IScientificOracle(oracle)
-            .validateMilestone(
-                owner(), _milestoneId, milestones[_milestoneId].ipfsHash, milestones[_milestoneId].amount
-            );
+        approved = oracle.validateMilestone(owner(), _milestoneId, m.ipfsHash, m.amount);
+        m.oracleApproved = approved;
 
-        milestones[_milestoneId].oracleApproved = approved;
         emit OracleApproval(_milestoneId, approved);
     }
 
-    /// @notice Release funds after oracle and auditor approval.
-    /// @param _milestoneId Milestone being released.
-    // 4) Una vez que el oracle y los auditores aprueban, se libera el pago.
-    //    Esta parte usa la validación previa para evitar transferencias no autorizadas.
-    function releaseMilestone(uint256 _milestoneId) external onlyOwner nonReentrant {
-        if (_milestoneId >= milestoneCount) revert MilestoneNotFound();
+    /// @notice Libera los fondos del hito al owner si tiene mayoría absoluta de auditores y aprobación del oráculo.
+    /// @dev Sigue Checks-Effects-Interactions y está protegida con nonReentrant.
+    /// @param _milestoneId ID del hito a liberar.
+    function releaseMilestone(uint256 _milestoneId) external nonReentrant onlyOwner milestoneExists(_milestoneId) {
+        // Checks
+        Milestone storage m = milestones[_milestoneId];
+        if (m.released) revert MilestoneAlreadyReleased(_milestoneId);
+        if (!m.oracleApproved) revert OracleRejected(_milestoneId);
 
-        Milestone storage milestone = milestones[_milestoneId];
-        if (milestone.released) revert MilestoneAlreadyReleased();
-        if (!milestone.oracleApproved) revert OracleRejected();
+        uint256 votesFor = m.votesFor;
+        uint256 required = approvalsRequired();
+        if (votesFor < required) revert NoApproval(votesFor, required);
 
-        uint256 approvalVotes = milestone.votesFor;
-        uint256 rejectionVotes = milestone.votesAgainst;
-        uint256 totalAuditors = auditors.length;
+        uint256 amount = m.amount;
+        uint256 balance = address(this).balance;
+        if (balance < amount) revert InsufficientBalance(balance, amount);
 
-        if (approvalVotes <= rejectionVotes || approvalVotes <= (totalAuditors / 2)) {
-            revert NoApproval();
-        }
+        // Effects
+        m.released = true;
+        totalReleased += amount;
 
-        if (address(this).balance < totalReleased + milestone.amount) revert InvalidAmount();
-
-        milestone.released = true;
-        totalReleased += milestone.amount;
-
-        (bool success, ) = payable(owner()).call{value: milestone.amount}("");
+        // Interactions
+        address recipient = owner();
+        emit MilestoneReleased(_milestoneId, amount, recipient);
+        (bool success,) = payable(recipient).call{value: amount}("");
         if (!success) revert TransferFailed();
-
-        emit MilestoneReleased(_milestoneId, milestone.amount, owner());
     }
 
-    function isMilestoneReleased(uint256 _milestoneId) external view returns (bool) {
-        if (_milestoneId >= milestoneCount) revert MilestoneNotFound();
+    /// @notice Votos a favor necesarios para liberar un hito (mayoría absoluta de auditores).
+    /// @return required Cantidad mínima de votos a favor.
+    function approvalsRequired() public view returns (uint256 required) {
+        return auditors.length / 2 + 1;
+    }
+
+    /// @notice Cantidad de auditores registrados.
+    /// @return count Número de auditores.
+    function auditorCount() external view returns (uint256 count) {
+        return auditors.length;
+    }
+
+    /// @notice Indica si los fondos de un hito ya fueron liberados.
+    /// @param _milestoneId ID del hito.
+    /// @return released `true` si el hito fue liberado.
+    function isMilestoneReleased(uint256 _milestoneId)
+        external
+        view
+        milestoneExists(_milestoneId)
+        returns (bool released)
+    {
         return milestones[_milestoneId].released;
+    }
+
+    /// @notice Revierte si el hito no existe.
+    /// @param _milestoneId ID del hito a verificar.
+    function _checkMilestoneExists(uint256 _milestoneId) internal view {
+        if (_milestoneId >= milestoneCount) revert MilestoneNotFound(_milestoneId);
     }
 }
