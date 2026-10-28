@@ -37,9 +37,7 @@ contract Interact is Script {
         if (auditor1.balance < auditorGas) payable(auditor1).transfer(auditorGas);
         if (auditor2.balance < auditorGas) payable(auditor2).transfer(auditorGas);
         fund.contribute{value: donation}();
-        uint256 id = fund.createMilestone(
-            "Fase 1", "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG", milestoneAmount
-        );
+        uint256 id = fund.createMilestone("Fase 1", "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG", milestoneAmount);
         vm.stopBroadcast();
 
         // 2) Auditores: votan a favor (2 de 3 = mayoría absoluta).
