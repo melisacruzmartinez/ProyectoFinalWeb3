@@ -32,8 +32,6 @@ El sistema propuesto aporta valor en dos niveles:
 - Valor empresarial: mejora la confianza entre donantes, instituciones y la sociedad, al tiempo que permite una financiación más resiliente para la investigación.
 - Valor técnico: demuestra el uso de patrones seguros de contratos inteligentes, trazabilidad basada en eventos y una lógica de gobernanza aplicada al mundo real dentro de un entorno *blockchain*.
 
-## V. Estructura del repositorio
-
 ## V. Arquitectura
 
 ```text
