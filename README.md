@@ -141,16 +141,27 @@ source .env
 
 ### 2. Deploy + verificación en Sepolia
 ```bash
-forge script script/Deploy.s.sol --rpc-url sepolia --broadcast --verify
+forge script script/Deploy.s.sol --rpc-url sepolia --broadcast --verify --skip-simulation --slow
 ```
 
 ### 3. Ejecutar el flujo principal on-chain
 ```bash
 export FUND_ADDRESS=<dirección de ScientificFundOracle>
-forge script script/Interact.s.sol --rpc-url sepolia --broadcast
+forge script script/Interact.s.sol --rpc-url sepolia --broadcast --skip-simulation --slow
 ```
 
-### 4. Demo local con Anvil + MetaMask
+> **Nota Glamsterdam:** desde octubre de 2026 Sepolia aplica la EIP-8037 (repricing del gas de creación de estado). La simulación local de Forge ≤ 1.5 subestima el gas de deploy y escritura de storage nuevo (el primer intento de deploy falló por *out of gas*). Con `--skip-simulation` el gas lo estima el nodo de Sepolia con las reglas vigentes.
+
+### 4. Frontend sobre Sepolia
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+Abrir <http://127.0.0.1:5173>, conectar MetaMask (la app pide cambiar a Sepolia), y donar. La transacción queda visible en Etherscan. Para usar Anvil, crear `frontend/.env` con `VITE_NETWORK=anvil`.
+
+### 5. Demo local con Anvil + MetaMask (opcional)
 
 Terminal 1 – nodo local:
 ```bash
@@ -169,33 +180,40 @@ En una instancia limpia de Anvil, `ScientificFundOracle` queda en `0xe7f1725E773
 
 En MetaMask: agregar la red `Anvil Local` (RPC `http://127.0.0.1:8545`, chain ID `31337`) e importar una cuenta de Anvil.
 
-Terminal 3 – frontend:
+Terminal 3 – frontend (con `VITE_NETWORK=anvil` en `frontend/.env`):
 ```bash
 cd frontend
-npm install
 npm run dev
 ```
 Abrir <http://127.0.0.1:5173>, conectar MetaMask y donar. Anvil y Sepolia son redes distintas: las transacciones locales no aparecen en Etherscan.
 
 ## XI. Red y contratos desplegados
 
-Red: **Sepolia** (chainId 11155111)
+Red: **Ethereum Sepolia** (chainId `11155111`)
 
 | Contrato | Dirección | Código verificado |
 |---|---|---|
-| ScientificOracle | `TODO` | TODO |
-| ScientificFundOracle | `TODO` | TODO |
+| ScientificOracle | `0xADE08b4BbA42a5b7477b486bCcF00397a366eC0B` | [https://sepolia.etherscan.io/address/0xADE08b4BbA42a5b7477b486bCcF00397a366eC0B#code](https://sepolia.etherscan.io/address/0xADE08b4BbA42a5b7477b486bCcF00397a366eC0B#code) |
+| ScientificFundOracle | `0x5495219693ACbD985C1e375f5405B81995849149` | [https://sepolia.etherscan.io/address/0x5495219693ACbD985C1e375f5405B81995849149#code](https://sepolia.etherscan.io/address/0x5495219693ACbD985C1e375f5405B81995849149#code) |
+
+Los contratos también están verificados en [Sourcify](https://sourcify.dev). El escrow se desplegó apuntando al oráculo `0xADE08b4BbA42a5b7477b486bCcF00397a366eC0B` y con 3 auditores; owner: `0xbcbded73291304521e42dae2e116593db24eeef5`.
 
 ### Transacciones reales del flujo principal
 
-| Paso | Tx |
+Ejecutadas con `script/Interact.s.sol` (bloques 12008949 – 12008956). Resultado: hito `0` liberado, `totalRaised = 0.004 ETH`, `totalReleased = 0.002 ETH`.
+
+| Paso | Transacción |
 |---|---|
-| Donación (`contribute`) | TODO |
-| Crear hito (`createMilestone`) | TODO |
-| Voto auditor 1 | TODO |
-| Voto auditor 2 | TODO |
-| Validación oráculo (`validateMilestone`) | TODO |
-| Liberación (`releaseMilestone`) | TODO |
+| Fondeo de gas auditor 1 | [`0x5605ea21…61bbf5`](https://sepolia.etherscan.io/tx/0x5605ea2141fac8e712a603a12203200b1a694db1b3e3ec0afc9867ff8f61bbf5) |
+| Fondeo de gas auditor 2 | [`0x15365a33…505aed`](https://sepolia.etherscan.io/tx/0x15365a339659e0276704e0b27980ea9554954470f12aa7a78d57a01ffb505aed) |
+| Donación (`contribute`) | [`0x389cf48e…475d5d`](https://sepolia.etherscan.io/tx/0x389cf48edd046ed0d77535294430dfc783eebc38d3cbc077e5b4c146e9475d5d) |
+| Crear hito (`createMilestone`) | [`0xdab512aa…1bb8cd`](https://sepolia.etherscan.io/tx/0xdab512aa956f3c561d35f5a7b734482f3cdb52f7f52bec28066a7b88af1bb8cd) |
+| Voto auditor 1 (`voteMilestone`) | [`0x185411df…900613`](https://sepolia.etherscan.io/tx/0x185411dff22959c688cd215288f6d063a3704f1f3b855637a670aad949900613) |
+| Voto auditor 2 (`voteMilestone`) | [`0x7745494f…385e57`](https://sepolia.etherscan.io/tx/0x7745494f91cd9dee05c88c5c4961fd0c186692c9d4714b4e03a7209cee385e57) |
+| Validación del oráculo (`validateMilestone`, llamada inter-contrato) | [`0x156fd22b…2df8e9`](https://sepolia.etherscan.io/tx/0x156fd22b5a30a0fe376655b59b715b99763a82931a10dacba3ba8ecc072df8e9) |
+| Liberación de fondos (`releaseMilestone`) | [`0x76fc9e97…da99df`](https://sepolia.etherscan.io/tx/0x76fc9e97386e72fdd2c45834bf8450f413811da78c767052cbc90018d9da99df) |
+
+Historial completo del contrato: [https://sepolia.etherscan.io/address/0x5495219693ACbD985C1e375f5405B81995849149](https://sepolia.etherscan.io/address/0x5495219693ACbD985C1e375f5405B81995849149)
 
 ## XII. Limitaciones conocidas del MVP
 
@@ -204,6 +222,8 @@ Red: **Sepolia** (chainId 11155111)
 - No hay devolución a donantes si un hito es rechazado ni plazos de votación.
 - Un solo proyecto por contrato.
 - No se verifica on-chain que el CID exista en IPFS.
+- El frontend conecta donación y lectura de lo recaudado contra el contrato; el panel de hitos y auditoría todavía muestra datos de ejemplo (votación y liberación se ejecutan vía script).
+- Glamsterdam encarece el almacenamiento de strings (`title`, `ipfsHash`): crear un hito costó ~685k gas. En una fase futura conviene guardar solo un `bytes32` (digest del CID) y emitir el texto en eventos.
 
 ## XIII. Roadmap
 

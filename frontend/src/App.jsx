@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ethers } from 'ethers'
 import './App.css'
-import { CONTRACT_ADDRESS, SCIENTIFIC_FUND_ABI } from './contract'
+import { CONTRACT_ADDRESS, NETWORK, SCIENTIFIC_FUND_ABI } from './contract'
 import {
   decryptText,
   encryptText,
@@ -68,7 +68,7 @@ function App() {
     try {
       await window.ethereum.request({
         method: 'wallet_switchEthereumChain',
-        params: [{ chainId: '0x7a69' }],
+        params: [{ chainId: NETWORK.chainIdHex }],
       })
     } catch (switchError) {
       if (switchError.code === 4902) {
@@ -76,11 +76,11 @@ function App() {
           method: 'wallet_addEthereumChain',
           params: [
             {
-              chainId: '0x7a69',
-              chainName: 'Anvil Local',
+              chainId: NETWORK.chainIdHex,
+              chainName: NETWORK.chainName,
               nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-              rpcUrls: ['http://127.0.0.1:8545'],
-              blockExplorerUrls: [],
+              rpcUrls: NETWORK.rpcUrls,
+              blockExplorerUrls: NETWORK.blockExplorerUrls,
             },
           ],
         })
@@ -167,14 +167,14 @@ function App() {
       setIsLoading(true)
       const provider = new ethers.BrowserProvider(window.ethereum)
       const network = await provider.getNetwork()
-      if (network.chainId !== 31337n) {
-        setStatus('Selecciona Anvil Local (chain ID 31337) en MetaMask.')
+      if (network.chainId !== NETWORK.chainId) {
+        setStatus(`Selecciona ${NETWORK.chainName} (chain ID ${NETWORK.chainId}) en MetaMask.`)
         return
       }
 
       const deployedCode = await provider.getCode(CONTRACT_ADDRESS)
       if (deployedCode === '0x') {
-        setStatus('No hay contrato en esta instancia de Anvil. Vuelve a desplegar con script/Deploy.s.sol.')
+        setStatus(`No hay contrato en ${CONTRACT_ADDRESS} sobre ${NETWORK.chainName}.`)
         return
       }
 
@@ -276,7 +276,7 @@ function App() {
           </article>
           <article className="metric-card">
             <span>Red</span>
-            <strong>Anvil</strong>
+            <strong>{NETWORK.chainName}</strong>
             <small>ETH ficticio</small>
           </article>
         </section>
